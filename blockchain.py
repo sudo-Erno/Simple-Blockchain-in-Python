@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from flask import Flask
 from flask.globals import request
 from flask.json import jsonify
+from werkzeug.wrappers import response
 
 class Blockchain(object):
     def __init__(self):
@@ -37,7 +38,52 @@ class Blockchain(object):
             print(f'{block}')
             print()
             
+            # Check that the hash of the block is correct
+            if block['previous_hash'] != self.hash(last_block):
+                return False
+            
+            # Check if the PoW is correct
+            if not self.valid_proof(last_block['proof'], block['proof']):
+                return False
+            
+            last_block = block
+            current_index += 1
 
+        return True
+
+    def resolve_conflicts(self):
+        """
+        This is our Consensus Algorithm, it resolves
+        by replacing our chain with the longest one in the network
+        :return: <bool> True if our chain was replaced, Falsse if not
+        """
+
+        neighbours = self.nodes
+        new_chain = None
+
+        # We are only looking for chains longer than ours
+        max_length = len(self.chain)
+
+        # Grab and verify the chains from all the nodes in our network
+        for node in neighbours:
+            response = request.get(f'http://{node}/chain')
+
+            if response.status_code = 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+                # Check if the length is longer and the chain is valid
+                if length > max_length and self.valid_chain(chain):
+                    max_length = length
+                    new_chain = chain
+
+        # Replace our chain if we discoverd a new, valid chain longer than ours
+        if new_chain:
+            self.chain = new_chain
+            return True
+        
+        return False
+    
     def register_node(self, address):
         """
         Add a new node to the list of nodes
@@ -189,6 +235,43 @@ def full_chain():
         'chain': blockchain.chain, # List of Objects
         'length': len(blockchain.chain)
     }
+    return jsonify(response), 200
+
+@app.route('/nodes/register', methods=['POST'])
+def register_node():
+    values = request.get_json()
+
+    nodes = values.get('nodes')
+
+    if nodes is None:
+        return "Error: Supply a valid list of nodes", 400
+    
+    for node in nodes:
+        blockchain.register_node(node)
+
+    response = {
+        'message': 'New nodes have been added',
+        'total_nodes': list(blockchain.nodes)
+    }
+
+    return jsonify(response), 201
+
+@app.route('/nodes/resolve', methods=['GET'])
+def consensus():
+    replaced = blockchain.resolve_conflicts()
+
+    if replaced:
+        response = {
+            'message': 'Our chain was replaced',
+            'new_chain': blockchain.chain
+        }
+    
+    else:
+        repsonse = {
+            'message': 'Our chain is authoritative',
+            'chain': blockchain.chain
+        }
+    
     return jsonify(response), 200
 
 if __name__ == '__main__':
